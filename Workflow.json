@@ -1,0 +1,248 @@
+{
+  "name": "سیستم مدیریت خودکار تیکت‌های پشتیبانی",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyXMinutes",
+              "value": 5
+            }
+          ]
+        },
+        "simple": true,
+        "format": "simple",
+        "options": {
+          "labels": ["support-tickets"]
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "📧 Gmail Trigger (ایمیل‌های جدید با برچسب support)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": "Gmail OAuth2 Credentials"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst output = [];\nfor (const item of items) {\n  const email = item.json;\n  output.push({\n    json: {\n      messageId: email.id,\n      threadId: email.threadId,\n      from: email.from,\n      to: email.to,\n      subject: email.subject,\n      body: email.textPlain || email.textHtml || '',\n      receivedAt: email.receivedAt || new Date().toISOString(),\n      isValid: true\n    }\n  });\n}\nreturn output;"
+      },
+      "id": "extract-email-data",
+      "name": "🔍 استخراج داده‌های ایمیل",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "sheetId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "dataMode": "define",
+        "values": {
+          "string": [
+            {
+              "name": "messageId",
+              "value": "={{ $json.messageId }}"
+            },
+            {
+              "name": "threadId",
+              "value": "={{ $json.threadId }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.subject }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $json.body.substring(0, 500) }}"
+            },
+            {
+              "name": "receivedAt",
+              "value": "={{ $json.receivedAt }}"
+            },
+            {
+              "name": "status",
+              "value": "new"
+            }
+          ]
+        }
+      },
+      "id": "google-sheets-log",
+      "name": "📊 Google Sheets (ثبت تیکت)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [650, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": "Google Sheets OAuth2"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.trello.com/1/cards",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "idList",
+              "value": "YOUR_TRELLO_LIST_ID"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.subject }}"
+            },
+            {
+              "name": "desc",
+              "value": "از: {{ $json.from }}\nپیام: {{ $json.body }}"
+            },
+            {
+              "name": "pos",
+              "value": "top"
+            },
+            {
+              "name": "due",
+              "value": "null"
+            }
+          ]
+        }
+      },
+      "id": "trello-create-card",
+      "name": "📋 Trello (ایجاد کارت تیکت)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300],
+      "credentials": {
+        "httpQueryAuth": "Trello API Key & Token"
+      }
+    },
+    {
+      "parameters": {
+        "message": {
+          "to": "={{ $json.from }}",
+          "subject": "ثبت درخواست پشتیبانی شما",
+          "html": "<p>کاربر گرامی،</p><p>درخواست شما با موفقیت ثبت شد. تیم پشتیبانی به زودی آن را بررسی خواهد کرد.</p><p>شماره پیگیری: {{ $json.messageId }}</p><p>با تشکر<br>تیم پشتیبانی</p>"
+        },
+        "operation": "send"
+      },
+      "id": "gmail-send-reply",
+      "name": "✉️ Gmail (ارسال پاسخ خودکار)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "gmailOAuth2": "Gmail OAuth2 Credentials"
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "📬 *تیکت جدید پشتیبانی*\nاز: {{ $json.from }}\nموضوع: {{ $json.subject }}\nخلاصه: {{ $json.body.substring(0, 200) }}...\n[مشاهده در Trello](https://trello.com/c/{{ $json.trelloCardId }})"
+      },
+      "id": "telegram-notify",
+      "name": "📱 Telegram (اعلان به گروه پشتیبانی)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": "Telegram Bot Token"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// در این نود می‌توانید در صورت نیاز خطاها را مدیریت کنید\nconst item = $input.first().json;\nreturn [{ json: { success: true, ...item } }];"
+      },
+      "id": "success-end",
+      "name": "✅ پایان موفق",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "📧 Gmail Trigger (ایمیل‌های جدید با برچسب support)": {
+      "main": [
+        [
+          {
+            "node": "🔍 استخراج داده‌های ایمیل",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 استخراج داده‌های ایمیل": {
+      "main": [
+        [
+          {
+            "node": "📊 Google Sheets (ثبت تیکت)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Google Sheets (ثبت تیکت)": {
+      "main": [
+        [
+          {
+            "node": "📋 Trello (ایجاد کارت تیکت)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Trello (ایجاد کارت تیکت)": {
+      "main": [
+        [
+          {
+            "node": "✉️ Gmail (ارسال پاسخ خودکار)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✉️ Gmail (ارسال پاسخ خودکار)": {
+      "main": [
+        [
+          {
+            "node": "📱 Telegram (اعلان به گروه پشتیبانی)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📱 Telegram (اعلان به گروه پشتیبانی)": {
+      "main": [
+        [
+          {
+            "node": "✅ پایان موفق",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "1.0.0",
+  "triggerCount": 1
+}
